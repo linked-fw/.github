@@ -1,0 +1,113 @@
+# The PR gates for every @_linked package: build + test, and a changeset reminder.
+#
+# The job NAMES below are load-bearing. Every repo's branch protection requires a check called
+# exactly `Build & Test`; renaming it stalls every release, because the automated version PR
+# can never satisfy a check that no longer reports.
+name: PR
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '22.16.0'
+      require-tests:
+        description: >-
+          `npm test --if-present` lets a package with no test script pass silently. Right for
+          the ontology packages, wrong for anything with real logic — those set this true and
+          a missing script becomes a failure.
+        type: boolean
+        default: false
+      run-e2e:
+        description: 'Run `npm run test:e2e` after the unit tests (cli).'
+        type: boolean
+        default: false
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      # The changesets version PR carries only an auto-generated version bump and CHANGELOG,
+      # so there is nothing to build. The JOB still has to run and report, though: branch
+      # protection requires this check, and a *skipped* job never reports at all, so skipping
+      # the job would leave the release PR unmergeable forever. Hence per-step guards.
+      - name: Detect release PR
+        id: rpr
+        run: |
+          if [[ "${{ github.event.pull_request.head.ref }}" == "changeset-release/main" ]]; then
+            echo "is_release_pr=true" >> $GITHUB_OUTPUT
+            echo "Release PR from changesets — skipping build/test (version + CHANGELOG only)."
+          else
+            echo "is_release_pr=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        run: npm run build
+
+      - name: Test
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        run: |
+          if [ "${{ inputs.require-tests }}" = "true" ]; then
+            npm test
+          else
+            npm test --if-present
+          fi
+
+      - name: Test (e2e)
+        if: steps.rpr.outputs.is_release_pr == 'false' && inputs.run-e2e
+        run: npm run test:e2e --if-present
+
+  changeset-check:
+    name: Check for changeset
+    # Nothing to remind about on the PR that consumes the changesets.
+    if: ${{ github.head_ref != 'changeset-release/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A warning, never a failure: plenty of PRs (docs, CI, refactors) should not cut a
+      # release, and a gate that is wrong half the time gets ignored the other half.
+      - name: Check for changeset files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            const hasChangeset = files.some(f =>
+              f.filename.startsWith('.changeset/') &&
+              f.filename.endsWith('.md') &&
+              f.filename !== '.changeset/README.md'
+            );
+
+            if (!hasChangeset) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: "No changeset found. If this PR should trigger a release, run `npx changeset` and commit the generated file.\n\nIf this change doesn't need a release (docs, CI config, etc.), you can ignore this message."
+              });
+              core.warning('No changeset file found in this PR.');
+            }
