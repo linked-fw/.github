@@ -78,6 +78,13 @@ jobs:
     # Nothing to remind about on the PR that consumes the changesets.
     if: ${{ github.head_ref != 'changeset-release/main' }}
     runs-on: ubuntu-latest
+    # The reminder is posted as a PR comment, which needs write access to pull requests. A
+    # reusable workflow cannot grant itself more than its caller holds, so the caller has to
+    # pass this down too — without it the step dies on "Resource not accessible by
+    # integration", which names a permission nowhere in the message.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
