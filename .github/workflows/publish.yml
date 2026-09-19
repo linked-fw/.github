@@ -112,29 +112,36 @@ jobs:
             echo "$name@$version is already staged and waiting for approval."; exit 0
           fi
 
-          # Fast path: OIDC trusted publishing.
-          #
-          # npm only ATTEMPTS the OIDC exchange when it has no token configured. `setup-node`
-          # wrote an .npmrc that injects NODE_AUTH_TOKEN, so with the normal config npm
-          # authenticates with the token, never tries trusted publishing, and a package that
-          # HAS a publisher still ends up staged — with `403 … This token can only publish to
-          # a staging area` as the only clue. So this attempt runs against an empty npm
-          # config: no token, which is what makes npm reach for the OIDC exchange.
-          #
-          # Failure here is expected and harmless for a package without a trusted publisher —
-          # it simply cannot authenticate. We log why and let the staged path below produce
-          # the real error if something else is wrong.
+          # Is an OIDC token even obtainable here? `ACTIONS_ID_TOKEN_REQUEST_URL` is injected
+          # only when `id-token: write` is granted — to the CALLER as well as to this
+          # workflow, since a reusable workflow cannot widen what it was given. If this says
+          # "no", the fault is on the GitHub side; if it says "yes" and the publish still
+          # cannot authenticate, the fault is the npm-side trusted-publisher registration.
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OIDC: an id-token IS obtainable in this job."
+          else
+            echo "::warning title=No OIDC token::ACTIONS_ID_TOKEN_REQUEST_URL is unset — 'id-token: write' is missing on the caller or this workflow, so trusted publishing cannot be attempted."
+          fi
+
+          # npm detects an OIDC environment and uses it BEFORE falling back to the token, so
+          # the token below does not block trusted publishing — it is only what npm reaches
+          # for when no trusted publisher is registered for this package. That fallback is
+          # stage-only, hence E_STAGE_REQUIRED, hence the staged release.
           echo "Publishing $name@$version…"
-          empty_npmrc="${RUNNER_TEMP:-/tmp}/oidc.npmrc"; : > "$empty_npmrc"
-          if out=$(NPM_CONFIG_USERCONFIG="$empty_npmrc" npm publish --access public --provenance 2>&1); then
+          if out=$(npm publish --access public --provenance 2>&1); then
             echo "$out"
             echo "::notice title=Published::$name@$version published directly via OIDC trusted publishing."
             exit 0
           fi
-          echo "OIDC publish did not succeed — falling back to a staged release. Reason:"
+          echo "Direct publish did not succeed — falling back to a staged release. Reason:"
           echo "$out"
 
-          echo "::warning title=Staged, not published::$name@$version needs manual approval. Register a trusted publisher for $name on npmjs.com to publish it directly next time."
+          if grep -qE 'ENEEDAUTH|E_STAGE_REQUIRED' <<<"$out"; then
+            echo "::warning title=Staged, not published::$name@$version needs manual approval. To publish it directly, register a trusted publisher on npmjs.com for $name with owner '${GITHUB_REPOSITORY%%/*}', repo '${GITHUB_REPOSITORY##*/}' and workflow 'publish.yml'."
+          else
+            echo "::error title=Publish failed::$name@$version failed for a reason unrelated to authentication. See the log above."
+            exit 1
+          fi
 
           # Capture the output: `npm stage publish` prints the stage id, and `npm stage approve`
           # takes ONLY that id — a package spec is rejected with "stage-id must be a valid
