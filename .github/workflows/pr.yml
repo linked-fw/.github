@@ -18,8 +18,18 @@ on:
           a missing script becomes a failure.
         type: boolean
         default: false
+      test-script:
+        description: >-
+          Which npm script the Test step runs. Defaults to `test`. A package whose `test`
+          chains a slow or container-backed suite names its unit script here instead, and
+          puts the rest behind `run-e2e` — otherwise consolidating CI silently switches on
+          suites that were deliberately gated off.
+        type: string
+        default: 'test'
       run-e2e:
-        description: 'Run `npm run test:e2e` after the unit tests (cli).'
+        description: >-
+          Run `npm run test:e2e` as a separate step. Off by default: these suites start
+          containers and are slow enough that they are opt-in per run, not per PR.
         type: boolean
         default: false
 
@@ -64,9 +74,9 @@ jobs:
         if: steps.rpr.outputs.is_release_pr == 'false'
         run: |
           if [ "${{ inputs.require-tests }}" = "true" ]; then
-            npm test
+            npm run ${{ inputs.test-script }}
           else
-            npm test --if-present
+            npm run ${{ inputs.test-script }} --if-present
           fi
 
       - name: Test (e2e)
