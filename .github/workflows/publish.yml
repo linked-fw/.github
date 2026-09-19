@@ -112,25 +112,29 @@ jobs:
             echo "$name@$version is already staged and waiting for approval."; exit 0
           fi
 
-          # Fast path. With `id-token: write` granted and a trusted publisher registered for
-          # this package, npm exchanges the OIDC token and publishes straight to `latest` — no
-          # token, no approval queue. Without one it falls back to NODE_AUTH_TOKEN, which is
-          # stage-only and answers E_STAGE_REQUIRED. That error, and only that error, means
-          # "this package has no trusted publisher yet" — so it is the signal to stage.
+          # Fast path: OIDC trusted publishing.
+          #
+          # npm only ATTEMPTS the OIDC exchange when it has no token configured. `setup-node`
+          # wrote an .npmrc that injects NODE_AUTH_TOKEN, so with the normal config npm
+          # authenticates with the token, never tries trusted publishing, and a package that
+          # HAS a publisher still ends up staged — with `403 … This token can only publish to
+          # a staging area` as the only clue. So this attempt runs against an empty npm
+          # config: no token, which is what makes npm reach for the OIDC exchange.
+          #
+          # Failure here is expected and harmless for a package without a trusted publisher —
+          # it simply cannot authenticate. We log why and let the staged path below produce
+          # the real error if something else is wrong.
           echo "Publishing $name@$version…"
-          if out=$(npm publish --access public --provenance 2>&1); then
+          empty_npmrc="${RUNNER_TEMP:-/tmp}/oidc.npmrc"; : > "$empty_npmrc"
+          if out=$(NPM_CONFIG_USERCONFIG="$empty_npmrc" npm publish --access public --provenance 2>&1); then
             echo "$out"
             echo "::notice title=Published::$name@$version published directly via OIDC trusted publishing."
             exit 0
           fi
+          echo "OIDC publish did not succeed — falling back to a staged release. Reason:"
           echo "$out"
 
-          if ! grep -q 'E_STAGE_REQUIRED' <<<"$out"; then
-            echo "::error title=Publish failed::$name@$version failed for a reason other than a missing trusted publisher. See the log above."
-            exit 1
-          fi
-
-          echo "::warning title=No trusted publisher::$name has none, so this release needs manual approval. Register one on npmjs.com to publish it directly next time."
+          echo "::warning title=Staged, not published::$name@$version needs manual approval. Register a trusted publisher for $name on npmjs.com to publish it directly next time."
 
           # Capture the output: `npm stage publish` prints the stage id, and `npm stage approve`
           # takes ONLY that id — a package spec is rejected with "stage-id must be a valid
