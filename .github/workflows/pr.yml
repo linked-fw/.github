@@ -64,7 +64,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.rpr.outputs.is_release_pr == 'false'
-        run: npm ci --legacy-peer-deps
+        run: npm ci
 
       - name: Build
         if: steps.rpr.outputs.is_release_pr == 'false'
