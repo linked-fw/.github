@@ -16,12 +16,13 @@ on:
     inputs:
       node-version:
         type: string
-        default: '22.16.0'
+        default: '24.21.0'
       npm-version:
         description: >-
-          `npm stage` landed in CLI 11.15.0 and Node 22.16 ships npm 10.x, so the bundled one
-          cannot stage. Pinned rather than `@latest` so a future npm release cannot change how
-          releases behave without a commit here.
+          `npm stage` landed in CLI 11.15.0. Node 24.21 already bundles npm 11.19, so this
+          install is no longer strictly needed to stage — it is kept as a PIN, so that the npm
+          a release runs on is decided here and not by whichever npm the Node image happens to
+          ship. Pinned rather than `@latest` for the same reason.
         type: string
         default: '^11.15.0'
     secrets:
