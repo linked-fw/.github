@@ -51,8 +51,12 @@ jobs:
       # the job would leave the release PR unmergeable forever. Hence per-step guards.
       - name: Detect release PR
         id: rpr
+        # The branch name is attacker-controlled on a fork PR; pass it through env, never
+        # interpolate it into the script.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          if [[ "${{ github.event.pull_request.head.ref }}" == "changeset-release/main" ]]; then
+          if [[ "$HEAD_REF" == "changeset-release/main" ]]; then
             echo "is_release_pr=true" >> $GITHUB_OUTPUT
             echo "Release PR from changesets — skipping build/test (version + CHANGELOG only)."
           else
