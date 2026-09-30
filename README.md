@@ -34,7 +34,7 @@ does not call these, so a change here does not reach community packages.
 
 | Input | Type | Default | What it does |
 |---|---|---|---|
-| `node-version` | string | `22.16.0` | Node for build and test. |
+| `node-version` | string | `24.21.0` | Node for build and test. |
 | `require-tests` | boolean | `false` | `false` runs `npm run <test-script> --if-present`, so a package with no test script passes. `true` makes a missing script a failure — for anything with real logic. |
 | `test-script` | string | `test` | Which npm script the Test step runs. For a package whose `test` chains a slow or container-backed suite, name the unit script here and put the rest behind `run-e2e`. |
 | `run-e2e` | boolean | `false` | Additionally runs `npm run test:e2e --if-present`. Opt-in: these start containers. |
@@ -60,8 +60,8 @@ reusable workflow cannot widen what its caller holds.
 
 | Input | Type | Default | What it does |
 |---|---|---|---|
-| `node-version` | string | `22.16.0` | Node for build and publish. |
-| `npm-version` | string | `^11.15.0` | npm installed globally before the run. `npm stage` needs ≥ 11.15.0 and Node 22.16 ships npm 10.x. Pinned so a future npm release cannot change release behaviour without a commit here. |
+| `node-version` | string | `24.21.0` | Node for build and publish. |
+| `npm-version` | string | `^11.15.0` | npm installed globally before the run. `npm stage` needs ≥ 11.15.0; Node 24.21 already bundles npm 11.19, so this is now a pin rather than a fix — it keeps the npm a release runs on decided here, not by the Node image. |
 
 Required secrets: `NPM_TOKEN` (stage-only fallback; unused when the package has a trusted
 publisher), `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`. Pass them by name, never
