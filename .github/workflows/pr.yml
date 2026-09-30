@@ -32,6 +32,13 @@ on:
           containers and are slow enough that they are opt-in per run, not per PR.
         type: boolean
         default: false
+      cli-version:
+        description: >-
+          The @_linked/cli that builds the package, as an npm version or range. Installed on
+          its own rather than taken from the package's lockfile: most lockfiles pin a CLI from
+          before the checks this build exists to run (1.30.0 added "Checking shape references").
+        type: string
+        default: '^1.30.0'
 
 jobs:
   build-and-test:
@@ -66,9 +73,20 @@ jobs:
         if: steps.rpr.outputs.is_release_pr == 'false'
         run: npm ci
 
+      # `linked build` rather than the package's own `npm run build`: it compiles the same
+      # tsconfigs and then runs the checks a plain tsc build never does — shape names, shape
+      # references, dependencies. The CLI goes in globally, not through `npx -p`: npx puts
+      # the CLI's own node_modules/.bin first on PATH, so its `npx tsc` would compile with
+      # the CLI's TypeScript instead of the package's.
+      - name: Install Linked CLI
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        env:
+          CLI_VERSION: ${{ inputs.cli-version }}
+        run: npm install --global --no-audit --no-fund "@_linked/cli@$CLI_VERSION"
+
       - name: Build
         if: steps.rpr.outputs.is_release_pr == 'false'
-        run: npm run build
+        run: linked build
 
       - name: Test
         if: steps.rpr.outputs.is_release_pr == 'false'
