@@ -25,6 +25,13 @@ on:
           ship. Pinned rather than `@latest` for the same reason.
         type: string
         default: '^11.15.0'
+      cli-version:
+        description: >-
+          The @_linked/cli that builds the package, as an npm version or range. Same input,
+          same default as pr.yml: the release must be built by the same CLI that built the PR,
+          or what is published is not what was checked.
+        type: string
+        default: '^1.30.0'
     secrets:
       NPM_TOKEN:
         description: 'Stage-only npm token. The FALLBACK credential — unused when the package has a trusted publisher.'
@@ -73,8 +80,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The same build as pr.yml — `linked build` from a globally installed CLI, not the
+      # package's `npm run build` — so the tarball is the output CI checked. With the two builds
+      # different, packages shipped defects the PR build never produced: a `main` naming a
+      # lib/cjs the plain build never emits, and extensionless ESM specifiers that `linked build`
+      # rewrites but plain `tsc` leaves as written. Global rather than `npx -p` for the reason
+      # given in pr.yml: npx would compile with the CLI's TypeScript instead of the package's.
+      #
+      # A package must not rebuild in `prepublishOnly`/`prepack`: `npm publish` runs those
+      # AFTER this step and would replace the checked output with a second build.
+      - name: Install Linked CLI
+        env:
+          CLI_VERSION: ${{ inputs.cli-version }}
+        run: npm install --global --no-audit --no-fund "@_linked/cli@$CLI_VERSION"
+
       - name: Build
-        run: npm run build
+        run: linked build
 
       # No `publish:` input — changesets only opens/updates the version PR. Publishing is the
       # step below, so that the OIDC-or-stage decision is ours to make rather than buried in

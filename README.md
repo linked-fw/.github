@@ -86,7 +86,8 @@ because most lockfiles pin a CLI from before those checks existed. It is install
 rather than run through `npx -p`, which would put the CLI's own `typescript` first on `PATH` and
 compile the package with the wrong compiler.
 
-`publish.yml` still builds with `npm run build`, so what is published is unchanged.
+`publish.yml` builds the same way, with the same `cli-version` input, so what is published is what
+PR CI built and checked.
 
 No secrets. The caller must grant `pull-requests: write` for the changeset reminder comment — a
 reusable workflow cannot widen what its caller holds.
@@ -97,6 +98,16 @@ reusable workflow cannot widen what its caller holds.
 |---|---|---|---|
 | `node-version` | string | `24.21.0` | Node for build and publish. |
 | `npm-version` | string | `^11.15.0` | npm installed globally before the run. `npm stage` needs ≥ 11.15.0; Node 24.21 already bundles npm 11.19, so this is now a pin rather than a fix — it keeps the npm a release runs on decided here, not by the Node image. |
+| `cli-version` | string | `^1.30.0` | The `@_linked/cli` the Build step installs globally and runs — keep it equal to the one passed to `pr.yml`. |
+
+The Build step runs **`linked build`**, exactly as `pr.yml` does, so the tarball is the output PR CI
+checked. Two consequences for a package repo:
+
+- Its own `build` script does not run at release. Extra work in it (a `chmod`, a check) belongs in
+  the test script, or in `prepublishOnly` **as a check only**.
+- `prepublishOnly` / `prepack` must not rebuild. `npm publish` runs them after the Build step, so a
+  rebuild there replaces the checked output with a second one, built by whatever CLI the lockfile
+  pins.
 
 Required secrets: `NPM_TOKEN` (stage-only fallback; unused when the package has a trusted
 publisher), `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`. Pass them by name, never
