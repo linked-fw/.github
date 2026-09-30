@@ -40,6 +40,41 @@ does not call these, so a change here does not reach community packages.
 | `run-e2e` | boolean | `false` | Additionally runs `npm run test:e2e --if-present`. Opt-in: these start containers. |
 | `cli-version` | string | `^1.30.0` | The `@_linked/cli` the Build step installs globally and runs. |
 
+### `packageManager` is enforced
+
+The job installs the exact npm named in the package's `packageManager` field before `npm ci`, and
+then asserts it. Until this existed the field was **inert on CI**: the job ran `npm ci` with
+whichever npm the Node image happened to ship, so a green check on an npm-version bump said
+nothing about the version being bumped.
+
+`actions/setup-node` does not close this. From v6 it reads `packageManager` only to decide whether
+to turn npm caching on; it never installs the npm named there, and it has no `corepack` or
+`package-manager` input ([actions/setup-node#531](https://github.com/actions/setup-node/issues/531)
+is still open). Corepack was the other candidate and was rejected on two counts: `corepack enable`
+does not shim npm unless npm is named explicitly, and Node stops distributing corepack at 25 — so
+it would arrive with an expiry date. An explicit `npm i -g npm@<exact>` is also what `publish.yml`
+already does, so this is the house pattern rather than a second one.
+
+What a package declares decides what happens:
+
+| `packageManager` | What the job does |
+|---|---|
+| `npm@11.20.0` (exact, optionally `+sha…`) | Installs that npm, then **fails** the build if `npm --version` does not match |
+| equal to the npm the image already bundles | Nothing to install; still asserted |
+| absent | Warns, keeps the bundled npm |
+| a non-npm manager (`pnpm@…`, `yarn@…`) | Warns — this workflow installs with `npm ci` — and keeps the bundled npm |
+| a range or tag (`npm@^11`, `npm@latest`) | Warns; a range is not a pin, so it is treated as malformed |
+
+Only the first row can fail the build, and only when the declared pin and the running npm disagree
+— which means the install did not take. Everything else warns, so a repo without the field, or
+with an odd one, is not broken by this.
+
+Read the **`Verify npm matches packageManager`** step of any run to see the Node and npm a job
+actually used; it prints both.
+
+`publish.yml` deliberately does **not** do this. It keeps its own `npm-version` input, so the npm a
+*release* runs on stays decided in this workflow rather than by the repo being released.
+
 The Build step runs **`linked build`**, not the package's own `npm run build`. It compiles the
 same `tsconfig-esm.json` / `tsconfig-cjs.json` with the package's own TypeScript, and then runs
 the checks a plain `tsc` build never does: shape names, shape references (loading each compiled

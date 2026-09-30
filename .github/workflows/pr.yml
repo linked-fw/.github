@@ -73,6 +73,88 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
+      # `packageManager` is a declaration until something acts on it, and nothing did: this job
+      # ran `npm ci` with whatever npm the Node image happened to ship, so every repo's
+      # `"packageManager": "npm@11.20.0"` was inert on CI and a green check on an npm bump was
+      # evidence about the image, not about the version the repo pins.
+      #
+      # setup-node does NOT close this. From v6 it reads `packageManager` only to decide whether
+      # to switch npm caching on; it never installs the npm named there, and it has no `corepack`
+      # or `package-manager` input (actions/setup-node#531 is still open).
+      #
+      # Corepack was the other candidate and was rejected: `corepack enable` does not shim npm
+      # unless npm is named explicitly, and Node stops distributing corepack at 25 — so it would
+      # carry an expiry date. `npm i -g npm@<exact>` is what `publish.yml` already does, so this
+      # is the house pattern rather than a second one.
+      #
+      # Absent, non-npm or non-exact `packageManager` must NOT fail the build: it warns, leaves
+      # the bundled npm in place, and the Verify step below reports that nothing was pinned.
+      - name: Use the npm named in packageManager
+        id: pm
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        run: |
+          set -euo pipefail
+
+          declared=$(node -p "require('./package.json').packageManager || ''" 2>/dev/null || echo '')
+          bundled=$(npm --version)
+
+          if [ -z "$declared" ]; then
+            echo "No packageManager field in package.json — keeping the bundled npm $bundled."
+            echo "expected=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${declared%%@*}" != "npm" ]; then
+            echo "::warning title=packageManager not enforced::package.json declares '$declared', but this workflow installs with 'npm ci'. Keeping the bundled npm $bundled."
+            echo "expected=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The spec requires an exact version, optionally with a `+sha224.…` integrity suffix.
+          # A range (`npm@^11`) is not a pin, so it is treated as malformed rather than resolved.
+          if [[ ! "$declared" =~ ^npm@[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[^[:space:]]+)?$ ]]; then
+            echo "::warning title=packageManager not enforced::'$declared' is not an exact npm version (expected npm@X.Y.Z). Keeping the bundled npm $bundled."
+            echo "expected=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          want=${declared#npm@}
+          want=${want%%+*}
+
+          if [ "$want" = "$bundled" ]; then
+            echo "packageManager pins npm@$want, which is already the bundled npm — nothing to install."
+          else
+            echo "packageManager pins npm@$want; the image bundles $bundled. Installing…"
+            npm install --global --no-audit --no-fund "npm@$want"
+          fi
+
+          echo "expected=$want" >> "$GITHUB_OUTPUT"
+
+      # The proof, as its own step so the log names it. A change that silently does nothing is
+      # the failure this exists to fix, so when the field IS an exact pin, a mismatch here is an
+      # error: it means the install above did not take.
+      - name: Verify npm matches packageManager
+        if: steps.rpr.outputs.is_release_pr == 'false'
+        env:
+          EXPECTED: ${{ steps.pm.outputs.expected }}
+        run: |
+          set -euo pipefail
+          actual=$(npm --version)
+          echo "node --version -> $(node --version)"
+          echo "npm  --version -> $actual"
+
+          if [ -z "$EXPECTED" ]; then
+            echo "packageManager pins nothing enforceable — ran with the bundled npm $actual."
+            exit 0
+          fi
+
+          echo "packageManager  -> npm@$EXPECTED"
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error title=packageManager not honoured::package.json pins npm@$EXPECTED but this job is running npm $actual."
+            exit 1
+          fi
+          echo "OK: npm $actual matches the pinned packageManager."
+
       - name: Install dependencies
         if: steps.rpr.outputs.is_release_pr == 'false'
         run: npm ci
