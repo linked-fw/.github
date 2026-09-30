@@ -38,6 +38,20 @@ does not call these, so a change here does not reach community packages.
 | `require-tests` | boolean | `false` | `false` runs `npm run <test-script> --if-present`, so a package with no test script passes. `true` makes a missing script a failure — for anything with real logic. |
 | `test-script` | string | `test` | Which npm script the Test step runs. For a package whose `test` chains a slow or container-backed suite, name the unit script here and put the rest behind `run-e2e`. |
 | `run-e2e` | boolean | `false` | Additionally runs `npm run test:e2e --if-present`. Opt-in: these start containers. |
+| `cli-version` | string | `^1.30.0` | The `@_linked/cli` the Build step installs globally and runs. |
+
+The Build step runs **`linked build`**, not the package's own `npm run build`. It compiles the
+same `tsconfig-esm.json` / `tsconfig-cjs.json` with the package's own TypeScript, and then runs
+the checks a plain `tsc` build never does: shape names, shape references (loading each compiled
+shape module on its own, as a consumer does) and dependencies. A package whose `build` script does
+anything beyond that no longer has the extra work run in CI — put it in the test script instead.
+
+The CLI is installed on its own at `cli-version` rather than taken from the package's lockfile,
+because most lockfiles pin a CLI from before those checks existed. It is installed globally
+rather than run through `npx -p`, which would put the CLI's own `typescript` first on `PATH` and
+compile the package with the wrong compiler.
+
+`publish.yml` still builds with `npm run build`, so what is published is unchanged.
 
 No secrets. The caller must grant `pull-requests: write` for the changeset reminder comment — a
 reusable workflow cannot widen what its caller holds.
