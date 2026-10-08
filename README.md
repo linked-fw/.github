@@ -24,8 +24,9 @@ to `@v1`:
 `rdfs`, `react`, `s3`, `schema`, `sentry`, `server`, `server-utils`, `shape-ui`, `sioc`,
 `translation`, `xsd`.
 
-Four repos in the org do **not**: `app-template`, `livekit`, `live-sessions` (no caller stubs at
-all) and this repo. `linked-cm` keeps its own copy of both workflows at its own `v1` tag — it
+Two repos in the org do **not**: `app-template` (no caller stubs at all) and this repo.
+`livekit` and `live-sessions` were transferred to `linked-cm`; their `linked-fw/…` names are
+GitHub redirects. `linked-cm` keeps its own copy of both workflows at its own `v1` tag — it
 does not call these, so a change here does not reach community packages.
 
 ## Inputs a caller can pass

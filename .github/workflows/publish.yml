@@ -169,20 +169,24 @@ jobs:
             echo "::warning title=No OIDC token::ACTIONS_ID_TOKEN_REQUEST_URL is unset — 'id-token: write' is missing on the caller or this workflow, so trusted publishing cannot be attempted."
           fi
 
-          # npm detects an OIDC environment and uses it BEFORE falling back to the token, so
-          # the token below does not block trusted publishing — it is only what npm reaches
-          # for when no trusted publisher is registered for this package. That fallback is
-          # stage-only, hence E_STAGE_REQUIRED, hence the staged release.
-          echo "Publishing $name@$version…"
-          if out=$(npm publish --access public --provenance 2>&1); then
+          # The direct publish runs with the token BLANKED, so the only credential it can use is
+          # an OIDC trusted publisher. npm silently falls back from OIDC to whatever token is
+          # configured, so with the token present a 2FA-bypass token would publish directly
+          # here — and the notice below would credit OIDC for it (it did, in linked-cm). Blank, a
+          # success can only mean OIDC, and the token is only ever used for the staged release.
+          # (Empty rather than unset: setup-node's .npmrc references ${NODE_AUTH_TOKEN}.)
+          echo "Publishing $name@$version via OIDC trusted publishing…"
+          if out=$(NODE_AUTH_TOKEN= NPM_TOKEN= npm publish --access public --provenance 2>&1); then
             echo "$out"
             echo "::notice title=Published::$name@$version published directly via OIDC trusted publishing."
             exit 0
           fi
-          echo "Direct publish did not succeed — falling back to a staged release. Reason:"
+          echo "OIDC publish did not succeed — falling back to a staged release. Reason:"
           echo "$out"
 
-          if grep -qE 'ENEEDAUTH|E_STAGE_REQUIRED' <<<"$out"; then
+          # No trusted publisher shows up as an auth failure, which npm reports under several
+          # codes depending on whether the package exists yet. linked-cm measured ENEEDAUTH.
+          if grep -qE 'ENEEDAUTH|E401|E403|E404|EOTP|E_STAGE_REQUIRED' <<<"$out"; then
             echo "::warning title=Staged, not published::$name@$version needs manual approval. To publish it directly, register a trusted publisher on npmjs.com for $name with owner '${GITHUB_REPOSITORY%%/*}', repo '${GITHUB_REPOSITORY##*/}' and workflow 'publish.yml'."
           else
             echo "::error title=Publish failed::$name@$version failed for a reason unrelated to authentication. See the log above."
