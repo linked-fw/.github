@@ -97,6 +97,29 @@ jobs:
       - name: Build
         run: linked build
 
+      # `changeset version` bumps package.json but never package-lock.json, so every
+      # `chore: release` commit left the lock header (`version` and `packages[""].version`) one
+      # release behind, and the next `npm install` in any checkout rewrote it — a dirty lockfile
+      # nobody had touched. This script runs the same `changeset version` the action runs by
+      # default, then re-syncs the lock, so both land in the version PR's commit.
+      #
+      # It is a script file because the action exec()s `version:` without a shell: `&&` there
+      # would be passed to changeset as an argument. It runs under the npm installed above — the
+      # one `npm ci` used — so the lock's format does not flip between npm majors.
+      # `--package-lock-only` writes only the lockfile and keeps every existing resolution; the
+      # lock is already known to match package.json, since `npm ci` above fails otherwise, so in
+      # practice only the bumped versions change (in a workspace repo, the bumped members'
+      # entries too).
+      - name: Prepare the version script
+        run: |
+          cat > "$RUNNER_TEMP/changeset-version.sh" <<'EOF'
+          set -euo pipefail
+          node "$(node -p 'require.resolve("@changesets/cli/bin.js")')" version
+          if [ -f package-lock.json ]; then
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          fi
+          EOF
+
       # No `publish:` input — changesets only opens/updates the version PR. Publishing is the
       # step below, so that the OIDC-or-stage decision is ours to make rather than buried in
       # `changeset publish`'s call to `npm publish`.
@@ -104,6 +127,7 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
+          version: bash ${{ runner.temp }}/changeset-version.sh
           title: 'chore: release'
           commit: 'chore: release'
         env:
