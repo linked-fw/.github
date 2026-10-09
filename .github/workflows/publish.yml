@@ -19,10 +19,11 @@ on:
         default: '24.21.0'
       npm-version:
         description: >-
-          `npm stage` landed in CLI 11.15.0. Node 24.21 already bundles npm 11.19, so this
-          install is no longer strictly needed to stage — it is kept as a PIN, so that the npm
-          a release runs on is decided here and not by whichever npm the Node image happens to
-          ship. Pinned rather than `@latest` for the same reason.
+          FALLBACK only: the release runs on the npm pinned in the package's `packageManager`,
+          exactly as pr.yml does. This is installed when that field is absent or not an exact
+          npm pin, or pins an npm older than 11.15.0 (`npm stage` landed in CLI 11.15.0). A
+          range rather than `@latest`, so that even the fallback is decided here and not by
+          whichever npm the Node image happens to ship.
         type: string
         default: '^11.15.0'
       cli-version:
@@ -74,8 +75,87 @@ jobs:
           node-version: ${{ inputs.node-version }}
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Use an npm that can stage
-        run: npm i -g npm@${{ inputs.npm-version }}
+      # The release runs on the npm the package pins in `packageManager` — the same one pr.yml
+      # installs and asserts — so a release is built, locked and published by the npm its PR
+      # checks ran on. Before this, publish installed `npm-version` regardless of the pin, so a
+      # repo pinned to npm 12 was released on npm 11, and the lock refresh in every
+      # `chore: release` commit was written by a different npm major than the repo uses.
+      #
+      # The parsing (exact `npm@X.Y.Z` only, `+sha…` suffix stripped) is the same as pr.yml's
+      # step of the same name; change both together. It is duplicated rather than shared: a
+      # composite action used from a reusable workflow would have to be referenced by its own
+      # `linked-fw/.github/...@v1` ref, which is one more ref to keep in step.
+      #
+      # Two differences from pr.yml, both because this job must be able to stage:
+      #   - When the pin is unusable (absent, non-npm, not exact) it installs the `npm-version`
+      #     input instead of keeping the bundled npm — what this step always did before.
+      #   - A pin below 11.15.0 (no `npm stage`) is overridden by `npm-version`, with a warning.
+      - name: Use the npm named in packageManager
+        id: pm
+        env:
+          FALLBACK: ${{ inputs.npm-version }}
+        run: |
+          set -euo pipefail
+
+          declared=$(node -p "require('./package.json').packageManager || ''" 2>/dev/null || echo '')
+          bundled=$(npm --version)
+          want=''
+
+          if [ -z "$declared" ]; then
+            echo "No packageManager field in package.json — using the npm-version input ($FALLBACK)."
+          elif [ "${declared%%@*}" != "npm" ]; then
+            echo "::warning title=packageManager not enforced::package.json declares '$declared', but this workflow installs with 'npm ci'. Using the npm-version input ($FALLBACK)."
+          # The spec requires an exact version, optionally with a `+sha224.…` integrity suffix.
+          # A range (`npm@^11`) is not a pin, so it is treated as malformed rather than resolved.
+          elif [[ ! "$declared" =~ ^npm@[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[^[:space:]]+)?$ ]]; then
+            echo "::warning title=packageManager not enforced::'$declared' is not an exact npm version (expected npm@X.Y.Z). Using the npm-version input ($FALLBACK)."
+          else
+            want=${declared#npm@}
+            want=${want%%+*}
+            IFS=. read -r major minor _ <<<"${want%%-*}"
+            if [ "$major" -lt 11 ] || { [ "$major" -eq 11 ] && [ "$minor" -lt 15 ]; }; then
+              echo "::warning title=packageManager too old to stage::package.json pins npm@$want, but 'npm stage' needs 11.15.0 or later. Using the npm-version input ($FALLBACK)."
+              want=''
+            fi
+          fi
+
+          if [ -z "$want" ]; then
+            npm install --global --no-audit --no-fund "npm@$FALLBACK"
+            echo "expected=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$want" = "$bundled" ]; then
+            echo "packageManager pins npm@$want, which is already the bundled npm — nothing to install."
+          else
+            echo "packageManager pins npm@$want; the image bundles $bundled. Installing…"
+            npm install --global --no-audit --no-fund "npm@$want"
+          fi
+
+          echo "expected=$want" >> "$GITHUB_OUTPUT"
+
+      # The same proof as pr.yml's step of the same name: when the pin was used, a mismatch here
+      # means the install above did not take, and the release must not go out on another npm.
+      - name: Verify npm matches packageManager
+        env:
+          EXPECTED: ${{ steps.pm.outputs.expected }}
+        run: |
+          set -euo pipefail
+          actual=$(npm --version)
+          echo "node --version -> $(node --version)"
+          echo "npm  --version -> $actual"
+
+          if [ -z "$EXPECTED" ]; then
+            echo "packageManager pins nothing usable — ran with npm $actual from the npm-version input."
+            exit 0
+          fi
+
+          echo "packageManager  -> npm@$EXPECTED"
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error title=packageManager not honoured::package.json pins npm@$EXPECTED but this job is running npm $actual."
+            exit 1
+          fi
+          echo "OK: npm $actual matches the pinned packageManager."
 
       - name: Install dependencies
         run: npm ci

@@ -73,8 +73,10 @@ with an odd one, is not broken by this.
 Read the **`Verify npm matches packageManager`** step of any run to see the Node and npm a job
 actually used; it prints both.
 
-`publish.yml` deliberately does **not** do this. It keeps its own `npm-version` input, so the npm a
-*release* runs on stays decided in this workflow rather than by the repo being released.
+`publish.yml` does the same, so a release runs on the npm its PR checks ran on. Its
+`npm-version` input is now only the fallback for a package whose `packageManager` is absent or
+unusable (and for a pin below 11.15.0, which cannot `npm stage`) — and unlike `pr.yml`, an
+unusable pin installs that fallback rather than keeping the bundled npm.
 
 The Build step runs **`linked build`**, not the package's own `npm run build`. It compiles the
 same `tsconfig-esm.json` / `tsconfig-cjs.json` with the package's own TypeScript, and then runs
@@ -98,7 +100,7 @@ reusable workflow cannot widen what its caller holds.
 | Input | Type | Default | What it does |
 |---|---|---|---|
 | `node-version` | string | `24.21.0` | Node for build and publish. |
-| `npm-version` | string | `^11.15.0` | npm installed globally before the run. `npm stage` needs ≥ 11.15.0; Node 24.21 already bundles npm 11.19, so this is now a pin rather than a fix — it keeps the npm a release runs on decided here, not by the Node image. |
+| `npm-version` | string | `^11.15.0` | **Fallback only.** The release installs the npm pinned in `packageManager`, exactly as `pr.yml` does, and asserts it. This is installed instead when `packageManager` is absent, non-npm or not an exact version, or pins an npm below 11.15.0 (the first with `npm stage`). |
 | `cli-version` | string | `^1.30.0` | The `@_linked/cli` the Build step installs globally and runs — keep it equal to the one passed to `pr.yml`. |
 
 The Build step runs **`linked build`**, exactly as `pr.yml` does, so the tarball is the output PR CI
