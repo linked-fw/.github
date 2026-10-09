@@ -190,13 +190,21 @@ jobs:
       # lock is already known to match package.json, since `npm ci` above fails otherwise, so in
       # practice only the bumped versions change (in a workspace repo, the bumped members'
       # entries too).
+      #
+      # `--allow-remote=all`: npm 12 defaults `allow-remote` to `none` and then refuses to fetch a
+      # tarball the lock does not already describe — which is what a package with
+      # `bundleDependencies` (e.g. @tailwindcss/oxide-wasm32-wasi) needs when its bundled
+      # `inBundle` entries are missing from the lock, failing the release with EALLOWREMOTE. The
+      # fetch only reads the bundled entries back out of the already-locked tarball; it changes no
+      # resolution. npm 11 knows the flag too (its default is already `all`), so this is a no-op
+      # there.
       - name: Prepare the version script
         run: |
           cat > "$RUNNER_TEMP/changeset-version.sh" <<'EOF'
           set -euo pipefail
           node "$(node -p 'require.resolve("@changesets/cli/bin.js")')" version
           if [ -f package-lock.json ]; then
-            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund --allow-remote=all
           fi
           EOF
 
