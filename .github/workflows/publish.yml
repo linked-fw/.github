@@ -8,7 +8,15 @@
 #
 #   1. A PR carrying a changeset merges. changesets sees pending changesets, opens/updates the
 #      `chore: release` PR (versions + CHANGELOG), and this workflow merges that PR itself.
-#   2. That merge pushes main again. No changesets remain, so the publish step runs.
+#   2. That merge pushes main again, and the Publish step releases the version it carries.
+#
+# Publish runs on EVERY push, BEFORE changesets, and is idempotent: whatever version main's
+# package.json names is published unless it is already on the registry or staged. It used to run
+# only when no changesets were pending, which lost releases: when a PR with a changeset merged
+# while the version PR was open, the version PR's merge still had a changeset on main, so that run
+# skipped Publish and opened the NEXT version PR instead. That version was never published
+# (@_linked/core 2.35.1). Publishing first makes the run order irrelevant: a run that is
+# cancelled or skipped leaves nothing behind that the next push to main does not pick up.
 name: Publish
 
 on:
@@ -208,25 +216,17 @@ jobs:
           fi
           EOF
 
-      # No `publish:` input — changesets only opens/updates the version PR. Publishing is the
-      # step below, so that the OIDC-or-stage decision is ours to make rather than buried in
-      # `changeset publish`'s call to `npm publish`.
-      - name: Create release Pull Request
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: bash ${{ runner.temp }}/changeset-version.sh
-          title: 'chore: release'
-          commit: 'chore: release'
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-
       # Publish, by whichever route the package is set up for.
       #
       # Idempotent: this runs on EVERY push to main, so it must do nothing when the version is
-      # already on the registry or already sitting in the approval queue.
+      # already on the registry or already sitting in the approval queue. It runs before
+      # changesets, unconditionally — see the header for the release it lost when it did not.
+      #
+      # A publish is only reported as done once the registry serves it: `npm publish` exiting 0
+      # means npm accepted the tarball, and npm says it "may take a few minutes to become
+      # available". If the version never appears (or never shows up in the stage queue), the job
+      # fails rather than going green.
       - name: Publish
-        if: steps.changesets.outputs.hasChangesets != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -235,6 +235,29 @@ jobs:
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           private=$(node -p "require('./package.json').private === true")
+
+          # Poll until the registry serves $name@$version, or fail the job. Up to 20 minutes:
+          # npm has been measured taking ~7 minutes to make an accepted publish visible.
+          verify_published() {
+            for i in $(seq 1 80); do
+              if npm view "$name@$version" version --prefer-online >/dev/null 2>&1; then
+                echo "Verified: npm view $name@$version -> $(npm view "$name@$version" version --prefer-online)"
+                return 0
+              fi
+              echo "Check $i/80: $name@$version is not on the registry yet; waiting…"
+              sleep 15
+            done
+            echo "::error title=Published version missing::npm accepted $name@$version, but the registry still does not serve it after 20 minutes. Check npmjs.com before re-running this workflow."
+            exit 1
+          }
+          verify_staged() {
+            if npm stage list "$name" 2>/dev/null | grep -F "$version" >/dev/null; then
+              echo "Verified: $name@$version is in the stage queue."
+              return 0
+            fi
+            echo "::error title=Staged version missing::'npm stage publish' ran, but $name@$version is neither in 'npm stage list $name' nor on the registry."
+            exit 1
+          }
 
           if [ "$private" = "true" ]; then
             echo "$name is private — nothing to publish."; exit 0
@@ -266,6 +289,7 @@ jobs:
           echo "Publishing $name@$version via OIDC trusted publishing…"
           if out=$(NODE_AUTH_TOKEN= NPM_TOKEN= npm publish --access public --provenance 2>&1); then
             echo "$out"
+            verify_published
             echo "::notice title=Published::$name@$version published directly via OIDC trusted publishing."
             exit 0
           fi
@@ -289,6 +313,7 @@ jobs:
           # `|| true` because the script runs under `set -euo pipefail`: a grep that matches
           # nothing exits 1 and would fail the step even though the staging itself succeeded.
           stage_id=$(printf '%s' "$staged" | grep -oE "$uuid" | tail -1 || true)
+          verify_staged
 
           {
             echo "### 📦 \`$name@$version\` is staged, not published"
@@ -315,6 +340,19 @@ jobs:
           else
             echo "::notice title=Approval needed::$name@$version is staged, but the stage id could not be read. Run: npm stage list $name"
           fi
+
+      # No `publish:` input — changesets only opens/updates the version PR. Publishing is the
+      # step above, so that the OIDC-or-stage decision is ours to make rather than buried in
+      # `changeset publish`'s call to `npm publish`.
+      - name: Create release Pull Request
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: bash ${{ runner.temp }}/changeset-version.sh
+          title: 'chore: release'
+          commit: 'chore: release'
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       # When changesets opened/updated the version PR, merge it so the release proceeds without
       # a manual click. The App token is used so the merge's push re-triggers this workflow,
