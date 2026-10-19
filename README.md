@@ -112,6 +112,13 @@ checked. Two consequences for a package repo:
   rebuild there replaces the checked output with a second one, built by whatever CLI the lockfile
   pins.
 
+The Publish step runs on every push to `main`, before changesets: it publishes the version in
+`main`'s `package.json` unless the registry already has it or it is staged. A green run means the
+version is on the registry (or in the stage queue): after `npm publish` the step polls
+`npm view <name>@<version>` for up to 20 minutes and fails the job if it never appears. npm can
+take several minutes to serve an accepted publish, so a version missing right after a green run
+may still be processing.
+
 Required secrets: `NPM_TOKEN` (stage-only fallback; unused when the package has a trusted
 publisher), `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`. Pass them by name, never
 `secrets: inherit`. The caller must grant `contents: write`, `pull-requests: write` and
