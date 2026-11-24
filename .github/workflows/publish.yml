@@ -30,9 +30,11 @@ on:
         description: >-
           The @_linked/cli that builds the package, as an npm version or range. Same input,
           same default as pr.yml: the release must be built by the same CLI that built the PR,
-          or what is published is not what was checked.
+          or what is published is not what was checked. `git:<ref>` builds
+          linked-fw/cli at that commit or branch instead, for a release whose packages need a
+          CLI that is not published yet.
         type: string
-        default: '^1.30.0'
+        default: 'git:a93b8fed34c9c89f17cc53d6af0bf05acc44a759'
     secrets:
       NPM_TOKEN:
         description: 'Stage-only npm token. The FALLBACK credential — unused when the package has a trusted publisher.'
@@ -172,7 +174,24 @@ jobs:
       - name: Install Linked CLI
         env:
           CLI_VERSION: ${{ inputs.cli-version }}
-        run: npm install --global --no-audit --no-fund "@_linked/cli@$CLI_VERSION"
+        run: |
+          set -euo pipefail
+          case "$CLI_VERSION" in
+            git:*)
+              # A CLI that is not on npm yet: linked-fw/cli at the given commit or branch,
+              # built and packed here, then installed globally like a published one.
+              ref=${CLI_VERSION#git:}
+              src="$RUNNER_TEMP/linked-cli-src"
+              git clone --quiet https://github.com/linked-fw/cli.git "$src"
+              git -C "$src" checkout --quiet "$ref"
+              echo "Building @_linked/cli from linked-fw/cli at $(git -C "$src" rev-parse HEAD)"
+              (cd "$src" && npm ci --no-audit --no-fund && npm run build && npm pack --pack-destination "$RUNNER_TEMP")
+              npm install --global --no-audit --no-fund "$RUNNER_TEMP"/_linked-cli-*.tgz
+              ;;
+            *)
+              npm install --global --no-audit --no-fund "@_linked/cli@$CLI_VERSION"
+              ;;
+          esac
 
       - name: Build
         run: linked build
