@@ -40,7 +40,7 @@ on:
           linked-fw/cli at that commit or branch instead, for a release whose packages need a
           CLI that is not published yet.
         type: string
-        default: 'git:a93b8fed34c9c89f17cc53d6af0bf05acc44a759'
+        default: '^2.0.0'
 
 jobs:
   build-and-test:
