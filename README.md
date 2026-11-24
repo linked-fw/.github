@@ -39,7 +39,7 @@ does not call these, so a change here does not reach community packages.
 | `require-tests` | boolean | `false` | `false` runs `npm run <test-script> --if-present`, so a package with no test script passes. `true` makes a missing script a failure — for anything with real logic. |
 | `test-script` | string | `test` | Which npm script the Test step runs. For a package whose `test` chains a slow or container-backed suite, name the unit script here and put the rest behind `run-e2e`. |
 | `run-e2e` | boolean | `false` | Additionally runs `npm run test:e2e --if-present`. Opt-in: these start containers. |
-| `cli-version` | string | `git:a93b8fed34c9c89f17cc53d6af0bf05acc44a759` | The `@_linked/cli` the Build step installs globally and runs: an npm version or range, or `git:<ref>` to build linked-fw/cli at that commit or branch (for a CLI that is not on npm yet). |
+| `cli-version` | string | `^2.0.0` | The `@_linked/cli` the Build step installs globally and runs: an npm version or range, or `git:<ref>` to build linked-fw/cli at that commit or branch (for a CLI that is not on npm yet). |
 
 ### `packageManager` is enforced
 
@@ -101,7 +101,7 @@ reusable workflow cannot widen what its caller holds.
 |---|---|---|---|
 | `node-version` | string | `24.21.0` | Node for build and publish. |
 | `npm-version` | string | `^11.15.0` | **Fallback only.** The release installs the npm pinned in `packageManager`, exactly as `pr.yml` does, and asserts it. This is installed instead when `packageManager` is absent, non-npm or not an exact version, or pins an npm below 11.15.0 (the first with `npm stage`). |
-| `cli-version` | string | `git:a93b8fed34c9c89f17cc53d6af0bf05acc44a759` | The `@_linked/cli` the Build step installs globally and runs (as in `pr.yml`) — keep it equal to the one passed to `pr.yml`. |
+| `cli-version` | string | `^2.0.0` | The `@_linked/cli` the Build step installs globally and runs (as in `pr.yml`) — keep it equal to the one passed to `pr.yml`. |
 
 The Build step runs **`linked build`**, exactly as `pr.yml` does, so the tarball is the output PR CI
 checked. Two consequences for a package repo:
